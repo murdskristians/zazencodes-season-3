@@ -5,7 +5,9 @@ what's generic, adapt what's repo-specific, verify it, and report. Work in the
 project's root. Don't clone this repository.
 
 The source is the folder the user pointed you at. On GitHub, read files from
-`https://raw.githubusercontent.com/zazencodes/zazencodes-season-3/main/src/software-factory-claude-code-v2/<path>`.
+`https://raw.githubusercontent.com/murdskristians/zazencodes-season-3/main/src/software-factory-claude-code-v2/<path>`.
+(This fork adds Windows support to the reference; upstream is
+`zazencodes/zazencodes-season-3`.)
 
 ## 0. Check the project
 
@@ -18,6 +20,19 @@ Stop and tell the user if any of these fail:
 - `claude --version` is 2.1.257 or later (the intake agent runs on Fable).
 - `python3 --version` is 3.10 or later. The scripts use only the standard
   library.
+- `agent-browser --version` works. The builder and the UX and UI reviewers look
+  at pages with it. If it's missing, ask the user before installing it:
+  `npm install -g agent-browser && agent-browser install`.
+- **On Windows**, also check these, in Git Bash (the factory's scripts and
+  `checks.sh` run under Git Bash, which Claude Code uses there):
+  - `python3 --version` prints a version. If it prints "Python was not found",
+    the Microsoft Store alias is shadowing Python: run
+    `uv python install 3.14 --default` (puts `python3` in `~/.local/bin`), or
+    turn off the python aliases in Settings → Apps → Advanced app settings →
+    App execution aliases.
+  - `/usr/bin/env -S true` succeeds. The scripts' shebang is
+    `#!/usr/bin/env -S python3 -X utf8` (UTF-8 mode, so issue text with
+    non-ASCII characters can't crash them).
 - None of the files in step 1 already exist. If one does, show the user the
   clash and ask before overwriting.
 
@@ -40,7 +55,9 @@ factory/checks.sh
 factory/bin/job
 factory/bin/gate
 factory/bin/route
+factory/bin/port
 factory/dashboard.html
+factory/.gitattributes
 ```
 
 ```bash
@@ -48,8 +65,13 @@ SRC=https://raw.githubusercontent.com/zazencodes/zazencodes-season-3/main/src/so
 for f in <the paths above>; do
   mkdir -p "$(dirname "$f")" && curl -fsSL "$SRC/$f" -o "$f"
 done
-chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route
+chmod +x factory/checks.sh factory/bin/job factory/bin/gate factory/bin/route factory/bin/port
+git add --chmod=+x factory/checks.sh factory/bin/*   # keeps them executable on Windows too
 ```
+
+`factory/.gitattributes` keeps the scripts' LF line endings: with
+`core.autocrlf=true` (the Git for Windows default) a CRLF shebang or
+`set -euo pipefail` breaks under Git Bash.
 
 Don't copy `README.md`, `DESIGN.md`, `INSTALL.md`, `LICENSE`, `examples/` or
 `docs/`. They describe the reference, not the user's project.
@@ -63,7 +85,10 @@ typecheck, tests and build, whichever the project has. Find them in
 and CI config. The script runs with a job's worktree as its working directory.
 It must be non-interactive, must not rewrite files (no `--fix`, no
 `--update-snapshots`), and must exit non-zero on any failure. Keep
-`set -euo pipefail`.
+`set -euo pipefail`. Watch for lint scripts that fix by default (e.g.
+`"lint": "eslint . --fix"`): call the tool directly without the fix flag
+instead (`pnpm exec eslint .`). On Windows the gate runs this script with Git
+Bash.
 
 **`factory/config.json`.**
 
@@ -148,7 +173,9 @@ gh label create factory:needs-human --color D93F0B --description "The factory ne
    `description`, `tools`, `model`, and `hooks` on the builder. Claude Code
    ignores unknown keys without a warning, so a typo silently changes behaviour.
 4. `python3 -m json.tool factory/config.json` succeeds.
-5. `git check-ignore factory/jobs/x .worktrees/x` prints both paths, and
+5. On Windows: `file factory/bin/* factory/checks.sh` mentions no "CRLF", and
+   `factory/bin/port pid 1` runs without an error.
+6. `git check-ignore factory/jobs/x .worktrees/x` prints both paths, and
    `git status --porcelain --untracked-files=all` lists every file from step 1
    (the skill, the agents and `factory/`) as committable.
 

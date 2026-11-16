@@ -77,8 +77,9 @@ command you ran and its result, or what the page showed.
   `--session <job-id>-builder` on every `agent-browser` call, so other jobs
   never drive your browser. Close it with
   `agent-browser --session <job-id>-builder close` and stop the dev server when
-  you're done. Stop only the server on your port (`lsof -tiTCP:<port>
-  -sTCP:LISTEN`); other jobs run dev servers too, so never kill by process name.
+  you're done. Stop only the server on your port, with
+  `<main checkout>/factory/bin/port stop <port>` (it works on Windows too, where
+  there is no `lsof`); other jobs run dev servers too, so never kill by process name.
 
 ## Commit, push, PR
 

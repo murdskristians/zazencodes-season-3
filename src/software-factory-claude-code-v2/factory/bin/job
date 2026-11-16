@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -X utf8
 """The only writer of factory/jobs/<job-id>/job.json.
 
 Every stage change goes through `advance`, which checks the files that justify
@@ -20,12 +20,12 @@ Usage:
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
 
-import fcntl
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +33,10 @@ REPO = Path(__file__).resolve().parents[2]
 FACTORY = REPO / "factory"
 JOBS = FACTORY / "jobs"
 BIN = FACTORY / "bin"
+WINDOWS = os.name == "nt"
+# Run sibling scripts through this interpreter: Windows can't execute a
+# shebang script directly, and -X utf8 matches their shebang.
+PYTHON = [sys.executable, "-X", "utf8"]
 CONFIG = json.loads((FACTORY / "config.json").read_text())
 LABELS = CONFIG["labels"]
 BASE = CONFIG["base_branch"]
@@ -111,16 +115,41 @@ def load(job_id):
     if not path.exists():
         die(f"no job {job_id}")
     if job_id not in _locks:
-        _locks[job_id] = open(job_dir(job_id) / ".lock", "w")
-        fcntl.flock(_locks[job_id], fcntl.LOCK_EX)
+        _locks[job_id] = lock_file(job_dir(job_id) / ".lock")
     return json.loads(path.read_text())
+
+
+def lock_file(path):
+    """Open path and lock it exclusively, waiting as long as it takes.
+    The lock is released when this process exits."""
+    f = open(path, "a+")
+    if WINDOWS:
+        import msvcrt
+        f.seek(0)
+        while True:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # retries ~10s, then raises
+                break
+            except OSError:
+                continue
+    else:
+        import fcntl
+        fcntl.flock(f, fcntl.LOCK_EX)
+    return f
 
 
 def save(job):
     path = job_dir(job["id"]) / "job.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(job, indent=2) + "\n")
-    tmp.replace(path)
+    for attempt in range(50):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:  # Windows: a reader (the dashboard) has job.json open
+            if not WINDOWS or attempt == 49:
+                raise
+            time.sleep(0.1)
 
 
 def all_jobs():
@@ -251,6 +280,13 @@ def transcripts_dir():
     return config / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
 
 
+def norm_path(text):
+    """Compare paths the same way on every OS: forward slashes, and on Windows
+    in any case (git may report the drive as c: where Python reports C:)."""
+    text = text.replace("\\", "/")
+    return text.lower() if WINDOWS else text
+
+
 def prompt_text(line):
     content = json.loads(line)["message"]["content"]
     if isinstance(content, str):
@@ -266,13 +302,13 @@ def cost_usd(job):
     factory prompt starts with `Job folder: <path>`, which ties a transcript to
     its job across sessions.
     """
-    needle = f"Job folder: {job_dir(job['id'])}/"
+    needle = norm_path(f"Job folder: {job_dir(job['id']).as_posix()}/")
     prices = CONFIG["prices_usd_per_mtok"]
     total = 0.0
     for path in transcripts_dir().glob("*/subagents/agent-*.jsonl"):
         with path.open() as f:
             first = f.readline()
-            if not first or needle not in prompt_text(first):
+            if not first or needle not in norm_path(prompt_text(first)):
                 continue
             usage_by_message = {}
             for line in f:
@@ -498,12 +534,29 @@ def advance(job, stage):
         label("issue", job["issue"], add=LABELS["needs_human"])
 
     if stage in TERMINAL and Path(job["worktree"]).exists():
-        run(["git", "worktree", "remove", "--force", job["worktree"]])
-        run(["git", "branch", "-D", job["branch"]], check=False)
+        remove_worktree(job)
 
     job["stage"] = stage
     job["ended"] = now() if stage in TERMINAL | WAITING else None
     return job
+
+
+def job_ports(job):
+    """The ports the skill gives this job's builder, UX and UI reviewers."""
+    n = int(job["id"][:3])
+    ports = CONFIG["ports"]
+    return [ports["base"] + ports["step"] * n + k for k in range(3)]
+
+
+def remove_worktree(job):
+    for port in job_ports(job):
+        subprocess.run([*PYTHON, str(BIN / "port"), "stop", str(port)], capture_output=True, text=True)
+    res = run(["git", "worktree", "remove", "--force", job["worktree"]], check=False)
+    if res.returncode != 0:
+        print(f"job: couldn't remove {job['worktree']}: {(res.stderr or res.stdout).strip()}. "
+              "Close whatever still has files open there, then run `git worktree prune`.",
+              file=sys.stderr)
+    run(["git", "branch", "-D", job["branch"]], check=False)
 
 
 # ---- Commands --------------------------------------------------------------
@@ -535,7 +588,7 @@ def cmd_create(number):
         "id": job_id, "issue": issue["number"], "title": issue["title"], "issue_url": issue["url"],
         "pr": None, "pr_url": None,
         "branch": f"factory/{job_id}",
-        "worktree": str(REPO / ".worktrees" / job_id),
+        "worktree": (REPO / ".worktrees" / job_id).as_posix(),
         "stage": "intake", "round": 0, "round_limit": CONFIG["max_rounds"],
         "intake": None, "agents": None, "gate": None, "reviews": {},
         "cost_usd": 0.0, "started": now(), "ended": None,
@@ -613,7 +666,7 @@ def cmd_merge(job):
     if merged.returncode != 0:
         git(job, "merge", "--abort", check=False)
         return fail(f"The branch conflicts with {BASE}:\n\n```\n{merged.stdout.strip()}\n```")
-    gate = subprocess.run([str(BIN / "gate"), job["id"], "--merge"], capture_output=True, text=True)
+    gate = subprocess.run([*PYTHON, str(BIN / "gate"), job["id"], "--merge"], capture_output=True, text=True)
     if gate.returncode != 0:
         return fail(f"The gate failed after syncing with {BASE}. "
                     f"See round-{job['round']}/merge-checks.md.\n\n{gate.stdout.strip()}")

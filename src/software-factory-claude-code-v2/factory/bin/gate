@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -X utf8
 """The deterministic gate: does the job's branch pass the repo's checks?
 
 Usage:
@@ -14,6 +14,8 @@ branch modifies or deletes a file matching config.json `protected_paths`
 
 import fnmatch
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -24,6 +26,22 @@ FACTORY = REPO / "factory"
 CONFIG = json.loads((FACTORY / "config.json").read_text())
 CHECKS = FACTORY / "checks.sh"
 TAIL = 80
+
+
+def find_bash():
+    """bash to run checks.sh with. On Windows that must be Git Bash: a bare
+    "bash" can resolve to C:\\Windows\\System32\\bash.exe, which is WSL."""
+    if os.name != "nt":
+        return "bash"
+    exec_path = subprocess.run(["git", "--exec-path"], capture_output=True, text=True).stdout.strip()
+    if exec_path:  # <git>/mingw64/libexec/git-core → <git>/bin/bash.exe
+        candidate = Path(exec_path).parents[2] / "bin" / "bash.exe"
+        if candidate.exists():
+            return str(candidate)
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower():
+        return found
+    die("Git Bash not found: install Git for Windows (https://git-scm.com/download/win)")
 
 
 def die(msg):
@@ -54,7 +72,7 @@ def protected_changes(worktree):
 
 def run_checks(worktree):
     start = time.monotonic()
-    res = subprocess.run(["bash", str(CHECKS)], cwd=worktree, capture_output=True, text=True)
+    res = subprocess.run([find_bash(), CHECKS.as_posix()], cwd=worktree, capture_output=True, text=True)
     return res.returncode, res.stdout + res.stderr, int(time.monotonic() - start)
 
 

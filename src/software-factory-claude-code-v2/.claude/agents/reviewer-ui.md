@@ -40,9 +40,9 @@ screenshot the page at desktop and phone widths. Pass `--session <job-id>-ui` on
 every `agent-browser` call, so other jobs' reviewers never drive your browser.
 Don't sign in or submit forms. When you're done, run
 `agent-browser --session <job-id>-ui close` and stop the dev server. Stop only
-the server you started, by the PID listening on your port
-(`lsof -tiTCP:<port> -sTCP:LISTEN`); other jobs run dev servers too, so
-never kill by process name.
+the server you started, with `<main checkout>/factory/bin/port stop <port>`
+(it works on Windows too, where there is no `lsof`); other jobs run dev
+servers too, so never kill by process name.
 
 ## What to look for
 

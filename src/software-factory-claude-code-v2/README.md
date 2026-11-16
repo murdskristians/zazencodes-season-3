@@ -13,16 +13,20 @@ Open Claude Code in your project and paste:
 ```text
 Install this software factory in this project from the reference repository:
 
-https://github.com/zazencodes/zazencodes-season-3/tree/main/src/software-factory-claude-code-v2
+https://github.com/murdskristians/zazencodes-season-3/tree/main/src/software-factory-claude-code-v2
 ```
+
+This fork of [zazencodes/zazencodes-season-3](https://github.com/zazencodes/zazencodes-season-3)
+also runs on Windows (Claude Code with Git Bash): see [Windows](#windows).
 
 Your agent reads [`INSTALL.md`](INSTALL.md), copies the skill, agents, scripts
 and dashboard, fills `factory/checks.sh` with your project's real test, lint,
 typecheck and build commands, tailors the reviewers to your stack, creates the
 GitHub labels, and checks that `checks.sh` passes on `main`.
 
-You need Claude Code 2.1.257 or later, `python3`, and an authenticated
-[`gh`](https://cli.github.com/) that can push to the repo.
+You need Claude Code 2.1.257 or later, `python3`, the
+[`agent-browser`](https://www.npmjs.com/package/agent-browser) CLI, and an
+authenticated [`gh`](https://cli.github.com/) that can push to the repo.
 
 ## The loop
 
@@ -101,6 +105,8 @@ factory/
   bin/job                     the only writer of job.json; refuses illegal moves; merges
   bin/gate                    runs checks.sh in a job's worktree → round-N/checks.md
   bin/route                   risk + surfaces → the job's reviewers and models
+  bin/port                    finds or stops the dev server on a port (lsof on Windows too)
+  .gitattributes              keeps the scripts' LF line endings on Windows
   dashboard.html              the board
 examples/jobs/                finished jobs from a real run
 INSTALL.md                    instructions for the installing agent
@@ -140,6 +146,31 @@ They come from a test run on a small private calculator repo, with
   the builder edited a protected test file, and the job went to a human after
   three rounds.
 - **005-add-a-crypto-miner**: rejected at intake.
+
+## Windows
+
+The factory runs on Windows in Claude Code, which runs its commands in Git
+Bash. What this fork changes for that:
+
+- **Line endings.** `factory/.gitattributes` keeps the scripts LF. With Git for
+  Windows' default `core.autocrlf=true`, the shebang would ask for a
+  `python3` with a trailing carriage return, and `set -euo pipefail` would fail.
+- **UTF-8.** The scripts run with `python3 -X utf8`, so issue text, gh output
+  and agent files aren't read as cp1252.
+- **No `fcntl`.** `job` locks job files with `msvcrt` on Windows.
+- **Script calls.** `route` and `job` run the other scripts through Python:
+  Windows can't execute a shebang script directly.
+- **The right bash.** `gate` runs `checks.sh` with Git Bash, not
+  `C:\Windows\System32\bash.exe` (WSL).
+- **Paths.** Worktree paths are stored with forward slashes, so agents can
+  paste them into bash.
+- **No `lsof`.** Agents stop their dev server with `factory/bin/port stop <port>`,
+  and a finished job's servers are stopped before its worktree is removed
+  (open files would block the removal on Windows).
+
+Make sure `python3` really runs Python: on many machines it is the Microsoft
+Store alias. `uv python install 3.14 --default` fixes that, or turn the alias
+off in Settings → Apps → Advanced app settings → App execution aliases.
 
 ## Cost and safety
 
