@@ -93,8 +93,6 @@ Bash.
 **`factory/config.json`.**
 
 - `base_branch`: the default branch.
-- `merge_method`: `merge`, `squash` or `rebase`, one the repo allows
-  (`gh api repos/{owner}/{repo} --jq '{allow_merge_commit, allow_squash_merge, allow_rebase_merge}'`).
 - `protected_paths`: keep the two factory entries and don't add the project's
   tests. Features legitimately change existing tests (a new required field
   changes every fixture), and a protected test blocks the job with no way
@@ -160,7 +158,16 @@ committed, so ignore only these two paths, never `.claude/` or `factory/`.
 ```bash
 gh label create factory --color 5319E7 --description "Build this with the software factory"
 gh label create factory:needs-info --color FBCA04 --description "The factory asked the author a question"
-gh label create factory:needs-human --color D93F0B --description "The factory needs a human decision on the PR"
+gh label create factory:needs-human --color D93F0B --description "A person reviews and merges this PR"
+```
+
+**No merges.** The factory never merges a PR: its scripts have no merge
+command, and a person merges every PR. Make that hold for every agent too. In
+`.claude/settings.json` (create it if missing, keep anything already there),
+add `"Bash(gh pr merge:*)"` to `permissions.deny`:
+
+```json
+{ "permissions": { "deny": ["Bash(gh pr merge:*)"] } }
 ```
 
 ## 3. Verify
@@ -178,6 +185,7 @@ gh label create factory:needs-human --color D93F0B --description "The factory ne
 6. `git check-ignore factory/jobs/x .worktrees/x` prints both paths, and
    `git status --porcelain --untracked-files=all` lists every file from step 1
    (the skill, the agents and `factory/`) as committable.
+7. `.claude/settings.json` denies `Bash(gh pr merge:*)`.
 
 ## 4. Hand over
 
@@ -190,9 +198,10 @@ Then tell the user, in a few lines:
 
 - Label one or two small issues `factory`, then run `/factory run` in Claude
   Code from the project root.
-- Every job ends as a PR. The approver merges what it approves; the rest wait
-  labeled `factory:needs-human`. Approve one by merging it on GitHub, or tell
-  the factory what to change with `/factory <anything>`.
+- Every job ends as a PR labeled `factory:needs-human`, with the approver's
+  READY or ESCALATE recommendation posted on it. The factory never merges:
+  they review the PR and merge it on GitHub, or tell the factory what to
+  change with `/factory <anything>`.
 - Intake runs on Fable, once per issue. Depending on their plan, Fable can
   bill to usage credits rather than the plan's included usage.
 - To start carefully, set `concurrency` to 1 in `factory/config.json` and read

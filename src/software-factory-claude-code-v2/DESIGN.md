@@ -6,9 +6,9 @@ config file.
 
 ## The idea
 
-A software factory turns a queue of requests into merged code with a fixed
-pipeline. Scripts handle the deterministic stages, such as running the tests,
-moving state and merging. Agents do the judgment in between: whether a request
+A software factory turns a queue of requests into reviewed pull requests with
+a fixed pipeline. Scripts handle the deterministic stages, such as running the
+tests and moving state. Agents do the judgment in between: whether a request
 is worth building, what exactly to build, the code itself, and whether it's
 good. Each stage leaves a file behind, so you can see what happened and why.
 Every step's file opens with a `## Summary` of three to five bullets, so a human can
@@ -24,7 +24,7 @@ skim a job on the dashboard and read the detail only where it matters.
 | State | `factory/jobs/<job-id>/` | `job.json` plus every agent's file. Gitignored, local to the machine running the factory. |
 | Spine | `factory/bin/job`, `gate`, `route` | Deterministic. `job` is the only writer of `job.json` and refuses illegal moves. |
 | Checks | `factory/checks.sh` | The repo's test, lint, typecheck and build commands. The only repo-specific script. |
-| Exit | the PR | Every job ends as a PR that closes its issue. Merging it is the approval. |
+| Exit | the PR | Every job ends as a PR that closes its issue. A person merges it; merging is the approval. |
 
 ## Pipeline
 
@@ -36,12 +36,13 @@ spec-writer (opus) → spec.md
 builder            → commits; first round pushes + opens draft PR "Closes #<n>"
 gate (script)      → checks.sh; FAIL → builder gets the log, no reviewers spawned
 reviewers (routed) → parallel, WAIT FOR ALL; CHANGES → builder → gate → reviewers (max rounds)
-approver (opus)    → APPROVE: sync origin/main, gate, gh pr merge
-                     ESCALATE: PR ready, decision as PR comment, label factory:needs-human
+approver (opus)    → READY | ESCALATE: a recommendation, never a merge
+needs-human        → PR ready, decision as PR comment, label factory:needs-human;
+                     a person reviews and merges
 ```
 
 `stage` in `job.json` is one of `intake`, `needs-info`, `spec`, `build`,
-`gate`, `review`, `approve`, `merging`, `needs-human`, `merged`, `rejected`.
+`gate`, `review`, `approve`, `needs-human`, `merged`, `rejected`.
 The legal moves are in `TRANSITIONS` at the top of `factory/bin/job`.
 
 ## Decisions
@@ -83,7 +84,7 @@ A low-risk change with no UI runs one Haiku reviewer. Routing is visible in
 one file and changes without touching a prompt.
 
 **Scripts decide whether it works.** The gate runs `checks.sh` before any
-reviewer is spawned, and again after syncing with `main` before the merge.
+reviewer is spawned.
 A failing build goes straight back to the builder with the log. The gate runs
 the main checkout's copy of `checks.sh`, so a branch can't edit the checks it
 is judged by. It fails any branch that modifies or deletes a file under
@@ -96,15 +97,16 @@ as a nudge; the gate is still what decides.
 **Agents judge what scripts can't.** Reviewers don't re-run the test suite;
 they read the diff for correctness, scope, security, UX and visual fit.
 
-**A PR per issue, merged through GitHub.** v1 merged locally, which broke when
-the main checkout was dirty or busy. v2 merges with `gh pr merge`, so branch
-protection, required checks and the PR history all apply, and your main
-checkout is never touched. Before merging, the branch is synced with `main` and
-gated again, because another job may have merged since it was tested.
+**A PR per issue, merged by a person.** v1 merged locally, which broke when
+the main checkout was dirty or busy. Upstream v2 let the approver merge with
+`gh pr merge`. This fork never merges: an AI verdict is a recommendation, not
+an approval. Every PR goes through GitHub, so branch protection, required
+checks and the PR history all apply, and your main checkout is never touched.
 
-**You approve by merging.** The approver merges what it would merge itself and
-escalates the rest with a specific question. An escalated PR is ready for
-review and its issue is labeled `factory:needs-human`. Merge it to approve, or
+**You approve by merging.** The approver recommends READY (it would merge it
+itself, with the evidence) or ESCALATE (with the specific question you must
+answer). Either way the PR is marked ready for review and its issue is labeled
+`factory:needs-human`. Merge it to approve, or
 tell the factory what to change with `/factory <anything>`: your words go to
 the builder as `feedback-<k>.md` and the job runs another round. To drop a
 job that waits on you or on its author, tell the factory to reject it: the
@@ -131,8 +133,9 @@ break this.
 - Issue text reaches agents as quoted data in `issue.md`, with comments only
   from the issue's author and the factory's operator. It is never part of a
   prompt. Intake, which reads it first, has no shell.
-- Agents push only `factory/*` branches. Only `factory/bin/job merge` merges,
-  through `gh pr merge`. The factory never deploys.
+- Agents push only `factory/*` branches. The factory never merges and never
+  deploys: the scripts have no merge command, and the install denies
+  `Bash(gh pr merge:*)` to every agent.
 - One PR per issue; at most `max_rounds` build rounds per job before a human
   is asked.
 
@@ -143,8 +146,8 @@ break this.
 | `/factory <feature>`, one job per session | `/factory run` drains the issue queue, `concurrency` jobs at once, one orchestrator | Alex; @spec2k5, @MrHossamsaraya |
 | Copy-paste build prompt | One install prompt pointing at this folder | @felipeclavijo1736 |
 | Every job gets all four reviewers | Fable intake rates risk and surfaces; a script routes reviewers and models | @mptrista, @Robin-ox2mz |
-| Every verdict is an LLM opinion | `checks.sh` gates before review and before merge | @Robin-ox2mz |
-| Local `git merge`, needs a clean main checkout | A PR per issue, merged with `gh pr merge` | v1 on-camera merge failures |
+| Every verdict is an LLM opinion | `checks.sh` gates before review | @Robin-ox2mz |
+| Local `git merge`, needs a clean main checkout | A PR per issue; in this fork a person merges it | v1 on-camera merge failures |
 | `/factory approve` | Merge the PR on GitHub | v1 |
 | The spec writer can stall on questions | Intake asks on the issue and parks the job | @acidrazor |
 | Cost invisible | Cost and time per job on the dashboard and in the run summary | the most common comment |
